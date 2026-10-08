@@ -2,6 +2,9 @@
 logs
 *.log
 npm-debug.log*
+.env
+.env.*
+!.env.example
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
@@ -14,6 +17,7 @@ dist-ssr
 .vinxi
 .tanstack/**
 .nitro
+.vercel
 *.local
 
 # Wrangler / Cloudflare
