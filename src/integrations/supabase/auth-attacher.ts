@@ -6,6 +6,10 @@ import { supabase } from './client'
 // the browser never attaches the bearer token to serverFn RPCs.
 export const attachSupabaseAuth = createMiddleware({ type: 'function' }).client(
   async ({ next }) => {
+    // Public routes must render with the local fallback catalogue before Supabase is configured.
+    if (!import.meta.env['VITE_SUPABASE_URL'] || !import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY']) {
+      return next();
+    }
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
     return next({
