@@ -36,6 +36,7 @@ const defaults: Record<ContentKey, Record<string, string>> = {
 function AdminPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const supabaseConfigured = Boolean(import.meta.env['VITE_SUPABASE_URL'] && import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY']);
   const load = useServerFn(getAdminContent);
   const saveBookFn = useServerFn(saveBook);
   const deleteBookFn = useServerFn(deleteBook);
@@ -68,6 +69,7 @@ function AdminPage() {
     }
   }
   useEffect(() => {
+    if (!supabaseConfigured) return;
     let mounted = true;
     void supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
@@ -75,7 +77,7 @@ function AdminPage() {
       if (data.user) void refresh();
     });
     return () => { mounted = false; };
-  }, []);
+  }, [supabaseConfigured]);
 
   async function login() {
     setBusy(true); setStatus('');
@@ -143,7 +145,7 @@ function AdminPage() {
   const nav: Array<[string, string]> = [['books', 'Books & PDFs'], ['categories', 'Categories'], ['home', 'Home page'], ['about', 'About page'], ['contact', 'Contact page'], ['branding', 'Branding'], ['journal', 'Journal']];
   return <div className="editorial-container content-page admin-page">
     <div className="page-intro"><p className="eyebrow">StoryGuide publishing</p><h1>Admin desk</h1><p>Manage the reading collection, public pages, and published PDFs.</p></div>
-    {!signedIn ? <div className="editor-login"><h2>Your publishing desk.</h2><p>Sign in with the verified StoryGuide owner Google account.</p><Button variant="editorial" onClick={login} disabled={busy}><PenLine />Continue with Google</Button></div> : <>
+    {!supabaseConfigured ? <div className="editor-login"><h2>Connect Supabase to enable publishing.</h2><p>The public site is running with its starter catalogue. Add the Supabase URL and publishable key in Vercel before using the admin desk.</p></div> : !signedIn ? <div className="editor-login"><h2>Your publishing desk.</h2><p>Sign in with the verified StoryGuide owner Google account.</p><Button variant="editorial" onClick={login} disabled={busy}><PenLine />Continue with Google</Button></div> : <>
       <div className="admin-toolbar"><nav className="admin-nav" aria-label="Admin sections">{nav.map(([id, label]) => <Button key={id} type="button" variant="filter" data-active={section === id} onClick={() => { setSection(id); setStatus(''); }}>{label}</Button>)}</nav><Button type="button" variant="ghost" onClick={logout}><LogOut />Sign out</Button></div>
       {!allowed ? <div className="editor-login"><p>{status || 'Checking owner access…'}</p></div> : <>
         {section === 'books' && <div className="admin-layout"><aside className="admin-list"><div className="admin-list-heading"><h2>Books</h2><Button type="button" size="sm" variant="outline" onClick={() => openBook()}><Plus />New</Button></div>{bookRows.map(row => <Button type="button" key={row.id} variant="ghost" className="editor-post" aria-pressed={book.id === row.id} onClick={() => openBook(row)}><span>{row.title}</span><span className="small-label">{row.published ? 'Published' : 'Draft'}</span></Button>)}</aside>
@@ -174,3 +176,4 @@ function Field({ label, children }: { label: string; children: ReactNode }) { re
 function SettingsEditor({ contentKey, values, busy, onChange, onSubmit }: { contentKey: ContentKey; values: Record<string, string>; busy: boolean; onChange: (value: Record<string, string>) => void; onSubmit: (event: FormEvent) => void }) {
   return <form className="contact-form admin-form settings-editor" onSubmit={onSubmit}><h2>Edit {contentKey === 'home' ? 'home page' : `${contentKey} page`}</h2>{contentFields[contentKey].map(([key, label]) => <Field key={key} label={label}>{key.includes('copy') || key === 'intro' || key === 'headline' || key === 'edition' ? <textarea value={values[key] ?? ''} onChange={event => onChange({ ...values, [key]: event.target.value })} /> : <input type={key === 'email' ? 'email' : key === 'instagram' ? 'url' : 'text'} value={values[key] ?? ''} onChange={event => onChange({ ...values, [key]: event.target.value })} />}</Field>)}<Button variant="editorial" disabled={busy}><Save />Save changes</Button></form>;
 }
+
