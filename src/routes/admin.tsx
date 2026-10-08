@@ -73,7 +73,6 @@ function AdminPage() {
     }
   }
   useEffect(() => {
-    if (!supabaseConfigured) return;
     let mounted = true;
     void checkSessionFn().then(({ authenticated }) => {
       if (!mounted) return;
@@ -81,7 +80,7 @@ function AdminPage() {
       if (authenticated) void refresh();
     });
     return () => { mounted = false; };
-  }, [supabaseConfigured, checkSessionFn]);
+  }, [checkSessionFn]);
 
   async function login() {
     setBusy(true); setStatus('');
@@ -162,7 +161,7 @@ function AdminPage() {
   const nav: Array<[string, string]> = [['books', 'Books & PDFs'], ['categories', 'Categories'], ['home', 'Home page'], ['about', 'About page'], ['contact', 'Contact page'], ['branding', 'Branding'], ['journal', 'Journal']];
   return <div className="editorial-container content-page admin-page">
     <div className="page-intro"><p className="eyebrow">StoryGuide publishing</p><h1>Admin desk</h1><p>Manage the reading collection, public pages, and published PDFs.</p></div>
-    {!supabaseConfigured ? <div className="editor-login"><h2>Connect Supabase to enable publishing.</h2><p>The public site is running with its starter catalogue. Add the Supabase URL and publishable key in Vercel before using the admin desk.</p></div> : !signedIn ? <form className="editor-login" onSubmit={event => { event.preventDefault(); void login(); }}><h2>Your publishing desk.</h2><p>Sign in to manage ebooks, covers, PDFs, and site pages.</p><Field label="Admin password"><input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></Field><Button variant="editorial" type="submit" disabled={busy}><PenLine />{busy ? 'Signing in…' : 'Sign in'}</Button>{status && <p className="form-status" role="status">{status}</p>}</form> : <>
+    {!signedIn ? <form className="editor-login" onSubmit={event => { event.preventDefault(); void login(); }}><h2>Your publishing desk.</h2><p>Enter the admin password to continue.</p><Field label="Admin password"><input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></Field><Button variant="editorial" type="submit" disabled={busy}><PenLine />{busy ? 'Signing in…' : 'Sign in'}</Button>{status && <p className="form-status" role="status">{status}</p>}</form> : !supabaseConfigured ? <div className="editor-login"><h2>Connect your Supabase project to publish.</h2><p>Your password was accepted. The database connection is still missing. Add the Supabase URL, publishable key, and server-only service-role key in Vercel, then apply the StoryGuide CMS migration.</p></div> : <>
       <div className="admin-toolbar"><nav className="admin-nav" aria-label="Admin sections">{nav.map(([id, label]) => <Button key={id} type="button" variant="filter" data-active={section === id} onClick={() => { setSection(id); setStatus(''); }}>{label}</Button>)}</nav><Button type="button" variant="ghost" onClick={logout}><LogOut />Sign out</Button></div>
       {!allowed ? <div className="editor-login"><p>{status || 'Checking owner access…'}</p></div> : <>
         {section === 'books' && <div className="admin-layout"><aside className="admin-list"><div className="admin-list-heading"><h2>Books</h2><Button type="button" size="sm" variant="outline" onClick={() => openBook()}><Plus />New</Button></div>{bookRows.map(row => <Button type="button" key={row.id} variant="ghost" className="editor-post" aria-pressed={book.id === row.id} onClick={() => openBook(row)}><span>{row.title}</span><span className="small-label">{row.published ? 'Published' : 'Draft'}</span></Button>)}</aside>
