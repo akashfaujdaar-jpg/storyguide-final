@@ -6,10 +6,8 @@ import { Plus, Save, Trash2, Upload, LogOut, PenLine, ExternalLink } from 'lucid
 import { Button } from '@/components/ui/button';
 import { pageHead } from '@/lib/seo';
 import { supabase } from '@/integrations/supabase/client';
-import { lovable } from '@/integrations/lovable';
-import { getAdminContent, saveBook, deleteBook, saveCategory, deleteCategory, saveSiteContent } from '@/lib/admin.functions';
-import type { CmsDatabase } from '@/lib/cms-database';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { getAdminSession, loginAdmin, logoutAdmin } from '@/lib/admin-auth.functions';
+import { getAdminContent, saveBook, deleteBook, saveCategory, deleteCategory, saveSiteContent, createPdfUpload, createCoverUpload } from '@/lib/admin.functions';
 
 export const Route = createFileRoute('/admin')({
   head: () => pageHead('StoryGuide Admin', 'Manage StoryGuide books, pages, categories, and PDF publications.', '/admin', true),
@@ -43,7 +41,13 @@ function AdminPage() {
   const saveCategoryFn = useServerFn(saveCategory);
   const deleteCategoryFn = useServerFn(deleteCategory);
   const saveSiteFn = useServerFn(saveSiteContent);
+  const checkSessionFn = useServerFn(getAdminSession);
+  const loginFn = useServerFn(loginAdmin);
+  const logoutFn = useServerFn(logoutAdmin);
+  const createPdfUploadFn = useServerFn(createPdfUpload);
+  const createCoverUploadFn = useServerFn(createCoverUpload);
   const [signedIn, setSignedIn] = useState(false);
+  const [password, setPassword] = useState('');
   const [allowed, setAllowed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -71,25 +75,23 @@ function AdminPage() {
   useEffect(() => {
     if (!supabaseConfigured) return;
     let mounted = true;
-    void supabase.auth.getUser().then(({ data }) => {
+    void checkSessionFn().then(({ authenticated }) => {
       if (!mounted) return;
-      setSignedIn(Boolean(data.user));
-      if (data.user) void refresh();
+      setSignedIn(authenticated);
+      if (authenticated) void refresh();
     });
     return () => { mounted = false; };
-  }, [supabaseConfigured]);
+  }, [supabaseConfigured, checkSessionFn]);
 
   async function login() {
     setBusy(true); setStatus('');
     try {
-      sessionStorage.setItem('storyguide-oauth-return', '/admin');
-      const result = await lovable.auth.signInWithOAuth('google', { redirect_uri: `${window.location.origin}/blog-editor` });
-      if (result.error) throw result.error;
-      if (!result.redirected) { setSignedIn(true); await refresh(); }
-    } catch { setStatus('Sign-in did not finish. Please try again.'); }
+      await loginFn({ data: { password } });
+      setPassword(''); setSignedIn(true); await refresh();
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Sign-in did not finish. Please try again.'); }
     finally { setBusy(false); }
   }
-  async function logout() { await supabase.auth.signOut(); setSignedIn(false); setAllowed(false); setBookRows([]); setStatus(''); await router.invalidate(); }
+  async function logout() { await logoutFn(); setSignedIn(false); setAllowed(false); setBookRows([]); setStatus(''); await router.invalidate(); }
   function openBook(row?: BookDraft) { setBook(row ? { ...row } : emptyBook(categoryRows[0]?.slug ?? '')); setStatus(''); }
   function openCategory(row?: CategoryDraft) { setCategory(row ? { ...row } : { slug: '', name: '', description: '', sort_order: categoryRows.length + 1, visible: true }); setStatus(''); }
   async function submitBook(event: FormEvent) {
@@ -114,13 +116,28 @@ function AdminPage() {
     if (!book.slug) { setStatus('Save a book address before uploading its PDF.'); return; }
     setBusy(true); setStatus('Uploading PDF…');
     try {
-      const client = supabase as unknown as SupabaseClient<CmsDatabase>;
-      const path = `${book.slug}/${crypto.randomUUID()}.pdf`;
-      const { error } = await client.storage.from('storyguide-pdfs').upload(path, file, { contentType: 'application/pdf', cacheControl: '31536000', upsert: false });
+      const { path, token } = await createPdfUploadFn({ data: { slug: book.slug, fileName: file.name } });
+      const { error } = await supabase.storage.from('storyguide-pdfs').uploadToSignedUrl(path, token, file, { contentType: 'application/pdf', cacheControl: '31536000' });
       if (error) throw error;
       setBook(current => ({ ...current, pdf_path: path }));
       setStatus('PDF uploaded. Save the book to publish the new file link.');
     } catch { setStatus('Could not upload the PDF. Check the storage migration and owner sign-in.'); }
+    finally { setBusy(false); input.value = ''; }
+  }
+  async function uploadCover(event: FormEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!['image/webp', 'image/jpeg', 'image/png'].includes(file.type) || file.size > 10 * 1024 * 1024) { setStatus('Choose a WebP, JPEG, or PNG cover smaller than 10 MB.'); return; }
+    if (!book.slug) { setStatus('Enter a book URL slug before uploading its cover.'); return; }
+    setBusy(true); setStatus('Uploading cover…');
+    try {
+      const { path, token, publicUrl } = await createCoverUploadFn({ data: { slug: book.slug, contentType: file.type as 'image/webp' | 'image/jpeg' | 'image/png' } });
+      const { error } = await supabase.storage.from('storyguide-covers').uploadToSignedUrl(path, token, file, { contentType: file.type, cacheControl: '31536000' });
+      if (error) throw error;
+      setBook(current => ({ ...current, cover_url: publicUrl, small_cover_url: publicUrl }));
+      setStatus('Cover uploaded. Save the book to publish the new cover.');
+    } catch { setStatus('Could not upload the cover. Check the Supabase storage migration and project settings.'); }
     finally { setBusy(false); input.value = ''; }
   }
   async function removeCurrentBook() {
@@ -145,7 +162,7 @@ function AdminPage() {
   const nav: Array<[string, string]> = [['books', 'Books & PDFs'], ['categories', 'Categories'], ['home', 'Home page'], ['about', 'About page'], ['contact', 'Contact page'], ['branding', 'Branding'], ['journal', 'Journal']];
   return <div className="editorial-container content-page admin-page">
     <div className="page-intro"><p className="eyebrow">StoryGuide publishing</p><h1>Admin desk</h1><p>Manage the reading collection, public pages, and published PDFs.</p></div>
-    {!supabaseConfigured ? <div className="editor-login"><h2>Connect Supabase to enable publishing.</h2><p>The public site is running with its starter catalogue. Add the Supabase URL and publishable key in Vercel before using the admin desk.</p></div> : !signedIn ? <div className="editor-login"><h2>Your publishing desk.</h2><p>Sign in with the verified StoryGuide owner Google account.</p><Button variant="editorial" onClick={login} disabled={busy}><PenLine />Continue with Google</Button></div> : <>
+    {!supabaseConfigured ? <div className="editor-login"><h2>Connect Supabase to enable publishing.</h2><p>The public site is running with its starter catalogue. Add the Supabase URL and publishable key in Vercel before using the admin desk.</p></div> : !signedIn ? <form className="editor-login" onSubmit={event => { event.preventDefault(); void login(); }}><h2>Your publishing desk.</h2><p>Sign in to manage ebooks, covers, PDFs, and site pages.</p><Field label="Admin password"><input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></Field><Button variant="editorial" type="submit" disabled={busy}><PenLine />{busy ? 'Signing in…' : 'Sign in'}</Button>{status && <p className="form-status" role="status">{status}</p>}</form> : <>
       <div className="admin-toolbar"><nav className="admin-nav" aria-label="Admin sections">{nav.map(([id, label]) => <Button key={id} type="button" variant="filter" data-active={section === id} onClick={() => { setSection(id); setStatus(''); }}>{label}</Button>)}</nav><Button type="button" variant="ghost" onClick={logout}><LogOut />Sign out</Button></div>
       {!allowed ? <div className="editor-login"><p>{status || 'Checking owner access…'}</p></div> : <>
         {section === 'books' && <div className="admin-layout"><aside className="admin-list"><div className="admin-list-heading"><h2>Books</h2><Button type="button" size="sm" variant="outline" onClick={() => openBook()}><Plus />New</Button></div>{bookRows.map(row => <Button type="button" key={row.id} variant="ghost" className="editor-post" aria-pressed={book.id === row.id} onClick={() => openBook(row)}><span>{row.title}</span><span className="small-label">{row.published ? 'Published' : 'Draft'}</span></Button>)}</aside>
@@ -158,6 +175,7 @@ function AdminPage() {
             <Field label="Themes (comma separated)"><input value={book.themes} onChange={event => setBook({ ...book, themes: event.target.value })} /></Field>
             <Field label="About this book"><textarea maxLength={2500} value={book.experience} onChange={event => setBook({ ...book, experience: event.target.value })} /></Field>
             <div className="form-pair"><Field label="Cover image URL"><input required={book.published} value={book.cover_url} onChange={event => setBook({ ...book, cover_url: event.target.value, small_cover_url: book.small_cover_url || event.target.value })} placeholder="/covers/book-cover.webp" /></Field><Field label="Small cover URL"><input value={book.small_cover_url} onChange={event => setBook({ ...book, small_cover_url: event.target.value })} placeholder="Optional — uses cover URL" /></Field></div>
+            <Field label="Or upload a cover image"><input type="file" accept="image/webp,image/jpeg,image/png" onChange={uploadCover} disabled={busy} /><span className="small-label">WebP, JPEG, or PNG · up to 10 MB. The file is served from Supabase Storage.</span></Field>
             <div className="admin-upload"><div><label htmlFor="book-pdf">PDF publication</label><p className="small-label">PDF only · up to 50 MB</p></div><input id="book-pdf" type="file" accept="application/pdf,.pdf" onChange={uploadPdf} disabled={busy} />{book.pdf_path && <><span className="small-label">PDF attached</span><Button type="button" variant="ghost" onClick={() => setBook({ ...book, pdf_path: null })}>Remove PDF</Button></>}</div>
             <label className="publish-toggle"><input type="checkbox" checked={book.published} onChange={event => setBook({ ...book, published: event.target.checked })} />Publish this title on the website</label>
             <div className="admin-form-actions"><Button variant="editorial" disabled={busy}><Save />{busy ? 'Saving…' : book.published ? 'Save & publish' : 'Save draft'}</Button>{book.id && <Button type="button" variant="ghost" onClick={removeCurrentBook} disabled={busy}><Trash2 />Delete</Button>}</div>

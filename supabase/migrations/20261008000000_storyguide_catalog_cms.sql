@@ -81,6 +81,12 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('storyguide-pdfs', 'storyguide-pdfs', true, 52428800, array['application/pdf'])
 on conflict (id) do update set public = true, file_size_limit = 52428800, allowed_mime_types = array['application/pdf'];
 
+-- Publicly served, size-limited cover images. Only server-authorized admin sessions
+-- can request the short-lived signed upload URLs used by the publishing desk.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('storyguide-covers', 'storyguide-covers', true, 10485760, array['image/webp', 'image/jpeg', 'image/png'])
+on conflict (id) do update set public = true, file_size_limit = 10485760, allowed_mime_types = array['image/webp', 'image/jpeg', 'image/png'];
+
 create policy "Public can view StoryGuide PDFs" on storage.objects
   for select to public using (bucket_id = 'storyguide-pdfs');
 create policy "Verified StoryGuide editor uploads PDFs" on storage.objects
@@ -114,3 +120,4 @@ values
   ('small-talks', 'The Cartography of Small Talks', 'stories-fiction', 'Stories of everyday encounters', 'A chance conversation can change the shape of an ordinary day. This fiction concept follows the quiet intersections between strangers, neighbours and people with more in common than they know.', 'Readers drawn to intimate fiction and stories about ordinary lives.', array['Everyday encounters','Belonging','Human connection'], 'A moment of escape, and a new way to notice the people around you.', '/covers/small-talks-640.webp', '/covers/small-talks-320.webp', true, 5),
   ('beginning-again', 'Notes on Beginning Again', 'personal-growth', 'Small steps. New chapters.', 'Starting over rarely arrives with a clear map. This reflective concept makes room for uncertainty, small steps and the possibility of a chapter that looks different from the last.', 'Readers at a crossroads, beginning something new or rethinking an old plan.', array['Life transitions','Uncertainty','Small steps'], 'A companion for thinking through change without rushing toward all the answers.', '/covers/beginning-again-640.webp', '/covers/beginning-again-320.webp', true, 6)
 on conflict (slug) do nothing;
+
